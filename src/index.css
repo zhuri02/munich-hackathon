@@ -1,0 +1,80 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    --background: 220 15% 8%;
+    --foreground: 220 10% 98%;
+
+    --card: 220 15% 10%;
+    --card-foreground: 220 10% 98%;
+
+    --popover: 220 15% 12%;
+    --popover-foreground: 220 10% 98%;
+
+    --primary: 20 100% 60%;
+    --primary-foreground: 0 0% 0%;
+
+    --secondary: 220 15% 15%;
+    --secondary-foreground: 220 10% 98%;
+
+    --muted: 220 15% 18%;
+    --muted-foreground: 220 10% 70%;
+
+    --accent: 20 100% 60%;
+    --accent-foreground: 0 0% 0%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 220 10% 98%;
+
+    --border: 220 15% 20%;
+    --input: 220 15% 18%;
+    --ring: 20 100% 60%;
+
+    --radius: 0.75rem;
+
+    --sidebar-background: 220 15% 10%;
+    --sidebar-foreground: 220 10% 90%;
+    --sidebar-primary: 20 100% 60%;
+    --sidebar-primary-foreground: 0 0% 0%;
+    --sidebar-accent: 220 15% 15%;
+    --sidebar-accent-foreground: 220 10% 98%;
+    --sidebar-border: 220 15% 18%;
+    --sidebar-ring: 20 100% 60%;
+
+    /* Custom design tokens */
+    --gradient-primary: linear-gradient(135deg, hsl(20 100% 60%) 0%, hsl(25 100% 65%) 100%);
+    --gradient-subtle: linear-gradient(180deg, hsl(220 15% 10%) 0%, hsl(220 15% 8%) 100%);
+    --glass-bg: hsla(220 15% 15% / 0.6);
+    --glass-border: hsla(20 100% 60% / 0.2);
+    --shadow-glow: 0 0 40px hsla(20 100% 60% / 0.2);
+    --shadow-elevated: 0 10px 30px -10px hsla(220 15% 0% / 0.3);
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  @keyframes bubble-float {
+    0% {
+      opacity: 0.8;
+      transform: translateY(0) scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: translateY(-40px) scale(0.3);
+    }
+  }
+}
