@@ -31,8 +31,8 @@ serve(async (req) => {
     const weaviateUrl = Deno.env.get("WEAVIATE_URL");
     const weaviateApiKey = Deno.env.get("WEAVIATE_API_KEY");
     const openaiApiKey = Deno.env.get("OPENAI_API_KEY");
-    const supabaseUrl = Deno.env.get("SUPABASE_URL");
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const supabaseUrl = Deno.env.get("VITE_SUPABASE_URL");
+    const supabaseServiceKey = Deno.env.get("VITE_SUPABASE_SERVICE_ROLE_KEY");
 
     if (!weaviateUrl || !weaviateApiKey || !openaiApiKey || !supabaseUrl || !supabaseServiceKey) {
       throw new Error("Missing required environment variables");
