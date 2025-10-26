@@ -75,3 +75,13 @@ Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/c
 
 DB PW:
 -}fud%&'H4mBQAm
+
+
+Wie man das Projekt startet: 
+git clone <url>
+cd <ordner>
+
+npm i
+npm run dev
+
+im browser dann http://localhost:8080 öffnen

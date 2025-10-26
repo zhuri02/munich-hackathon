@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { sendTextToN8N } from "@/services/n8n";
 import { supabase } from "@/integrations/supabase/client";
 import { Session, User } from "@supabase/supabase-js";
+import { getChatMetadata, type ChatMetadata } from "@/services/metadata";
 
 interface Message {
   id: string;
@@ -48,6 +49,79 @@ interface Project {
   user_id?: string;
 }
 
+const RECEIVER_NAME = "ChatAgent";
+
+const defaultChatMetadata: ChatMetadata = {
+  title: "Chat Message",
+  category: "General",
+  department: "Support",
+};
+
+const sanitizeMetadataValue = (value: string) =>
+  value
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\r?\n/g, "\\n")
+    .trim();
+
+const coerceMetadataValue = (value: unknown, fallback: string) =>
+  typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
+
+const getSenderName = (user: User | null) => {
+  if (!user) return "User";
+
+  const userName = typeof user.user_metadata?.name === "string" ? user.user_metadata.name.trim() : "";
+  if (userName) return userName;
+
+  if (user.email) {
+    const [emailPrefix] = user.email.split("@");
+    if (emailPrefix?.trim()) return emailPrefix.trim();
+    return user.email;
+  }
+
+  return user.id;
+};
+
+const normalizeMetadata = (metadata?: Partial<ChatMetadata>): ChatMetadata => ({
+  title: coerceMetadataValue(metadata?.title, defaultChatMetadata.title),
+  category: coerceMetadataValue(metadata?.category, defaultChatMetadata.category),
+  department: coerceMetadataValue(metadata?.department, defaultChatMetadata.department),
+});
+
+const buildStructuredPayload = async (content: string, user: User | null) => {
+  const senderName = getSenderName(user);
+  let metadata = defaultChatMetadata;
+
+  console.log("🔍 DEBUG: Building structured payload");
+  console.log("📝 Original content:", content);
+  console.log("👤 Sender name:", senderName);
+
+  try {
+    const metadataResult = await getChatMetadata(content, senderName);
+    if (metadataResult) {
+      metadata = normalizeMetadata(metadataResult);
+      console.log("✅ Metadata result:", metadataResult);
+    }
+  } catch (metadataError) {
+    console.warn("❌ Failed to generate metadata, using defaults", metadataError);
+  }
+
+  console.log("📊 Final metadata:", metadata);
+
+  const escapedSender = sanitizeMetadataValue(senderName);
+  const escapedTitle = sanitizeMetadataValue(metadata.title);
+  const escapedContent = sanitizeMetadataValue(content);
+  const escapedCategory = sanitizeMetadataValue(metadata.category);
+  const escapedDepartment = sanitizeMetadataValue(metadata.department);
+  const effectiveDate = new Date().toISOString().split("T")[0];
+
+  const structuredText = `sender_name: "${escapedSender}", receiver_name: "${RECEIVER_NAME}", title: "${escapedTitle}"; content: "${escapedContent}"; category: "${escapedCategory}"; department: "${escapedDepartment}"; effective_date: "${effectiveDate}";`;
+
+  console.log("📤 Structured text to send:", structuredText);
+
+  return { structuredText, metadata, senderName };
+};
+
 const Index = () => {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<User | null>(null);
@@ -63,42 +137,10 @@ const Index = () => {
   const [movingChat, setMovingChat] = useState<Chat | null>(null);
   const [pendingDeletion, setPendingDeletion] = useState<{ type: "chat" | "project"; id: string; timeout: NodeJS.Timeout } | null>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const isInitialScroll = useRef(true);
   const navigate = useNavigate();
   const { toast } = useToast();
-
-  // Auth state
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (!session) {
-        navigate("/auth");
-      }
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (!session) {
-        navigate("/auth");
-      } else if (event === "SIGNED_IN") {
-        setTimeout(() => {
-          loadChatsAndProjects();
-        }, 0);
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, [navigate]);
-
-  // Load data when user is authenticated
-  useEffect(() => {
-    if (user) {
-      loadChatsAndProjects();
-    }
-  }, [user]);
 
   const loadChatsAndProjects = async () => {
     if (!user) return;
@@ -159,8 +201,59 @@ const Index = () => {
     }
   };
 
+  // Auth state
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      if (!session) {
+        navigate("/auth");
+      }
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      setSession(session);
+      setUser(session?.user ?? null);
+      if (!session) {
+        navigate("/auth");
+      } else if (event === "SIGNED_IN") {
+        setTimeout(() => {
+          loadChatsAndProjects();
+        }, 0);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigate]);
+
+  // Load data when user is authenticated
+  useEffect(() => {
+    if (user) {
+      loadChatsAndProjects();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
   const currentChat = chats.find((c) => c.id === currentChatId);
   const messages = currentChat?.messages || [];
+
+  useEffect(() => {
+    isInitialScroll.current = true;
+  }, [currentChatId]);
+
+  useEffect(() => {
+    if (!messagesEndRef.current) return;
+    messagesEndRef.current.scrollIntoView({
+      behavior: isInitialScroll.current ? "auto" : "smooth",
+      block: "end",
+    });
+    if (isInitialScroll.current) {
+      isInitialScroll.current = false;
+    }
+  }, [messages.length, isAiLoading, currentChatId]);
 
   const handleCreateNewChat = async () => {
     if (!user) return;
@@ -536,12 +629,30 @@ const Index = () => {
         content: msg.content
       })) || [];
 
-      // Send to N8N with full conversation history
-      const n8nResponse = await sendTextToN8N(content, {
+      console.log("💬 Conversation history length:", conversationHistory.length);
+      console.log("💬 Conversation history:", JSON.stringify(conversationHistory, null, 2));
+
+      const { structuredText, metadata, senderName } = await buildStructuredPayload(content, user);
+
+      console.log("📨 Sending to N8N with payload:", {
+        structuredText,
         messageId: userMessage.id,
         chatId: currentChatId,
         source: "chat",
         isVoiceMode,
+        metadata,
+        senderName,
+        conversationHistoryLength: conversationHistory.length
+      });
+
+      // Send to N8N with full conversation history
+      const n8nResponse = await sendTextToN8N(structuredText, {
+        messageId: userMessage.id,
+        chatId: currentChatId,
+        source: "chat",
+        isVoiceMode,
+        metadata,
+        senderName,
       }, conversationHistory);
 
       // DEBUG: Log the actual response to see what we get
@@ -571,11 +682,33 @@ const Index = () => {
       }
 
       // Extract the AI response from N8N webhook response
-      let aiResponseContent = "I received your message but couldn't generate a response.";
-
       console.log("N8N Response Data:", n8nResponse.data);
       console.log("Message field:", n8nResponse.data?.message);
       console.log("Message type:", typeof n8nResponse.data?.message);
+
+      // Check if we got a valid response
+      const hasValidResponse = n8nResponse.data !== null && 
+        n8nResponse.data !== undefined &&
+        (n8nResponse.data.message || 
+         (typeof n8nResponse.data === 'string' && n8nResponse.data.trim().length > 0));
+
+      // If no valid response, just finish loading without adding a message
+      if (!hasValidResponse) {
+        console.log("⚠️ No valid response from N8N, skipping message");
+        return;
+      }
+
+      // Additional check for null-like string values in the response data
+      if (typeof n8nResponse.data === 'string' && 
+          (n8nResponse.data.toLowerCase() === 'null' || 
+           n8nResponse.data.toLowerCase() === 'undefined' ||
+           n8nResponse.data === 'null' ||
+           n8nResponse.data === 'undefined')) {
+        console.log("⚠️ Response data is null-like string, skipping message");
+        return;
+      }
+
+      let aiResponseContent = "";
 
       // Handle different response structures - ensure we always extract a string
       if (n8nResponse.data?.message) {
@@ -602,6 +735,16 @@ const Index = () => {
       }
 
       console.log("Extracted AI Response:", aiResponseContent);
+
+      // Skip if response is empty, whitespace, or null-like values
+      if (!aiResponseContent.trim() || 
+          aiResponseContent.toLowerCase() === 'null' || 
+          aiResponseContent.toLowerCase() === 'undefined' ||
+          aiResponseContent === 'null' ||
+          aiResponseContent === 'undefined') {
+        console.log("⚠️ Empty or null response content, skipping message");
+        return;
+      }
 
       // Use actual RAG response from N8N
       const aiMessage: Message = {
@@ -721,11 +864,28 @@ const Index = () => {
         content: msg.content
       })) || [];
 
-      // Now send the transcribed text to N8N with conversation history
-      const n8nResponse = await sendTextToN8N(text, {
+      console.log("🎤 VOICE MODE - Conversation history length:", conversationHistory.length);
+      console.log("🎤 VOICE MODE - Conversation history:", JSON.stringify(conversationHistory, null, 2));
+
+      const { structuredText, metadata, senderName } = await buildStructuredPayload(text, user);
+
+      console.log("🎤 VOICE MODE - Sending to N8N with payload:", {
+        structuredText,
         chatId: currentChatId,
         source: "voice",
         originalFormat: "audio",
+        metadata,
+        senderName,
+        conversationHistoryLength: conversationHistory.length
+      });
+
+      // Now send the transcribed text to N8N with conversation history
+      const n8nResponse = await sendTextToN8N(structuredText, {
+        chatId: currentChatId,
+        source: "voice",
+        originalFormat: "audio",
+        metadata,
+        senderName,
       }, conversationHistory);
 
       if (!n8nResponse.success) {
@@ -737,8 +897,30 @@ const Index = () => {
         return;
       }
 
+      // Check if we got a valid response
+      const hasValidResponse = n8nResponse.data !== null && 
+        n8nResponse.data !== undefined &&
+        (n8nResponse.data.message || 
+         (typeof n8nResponse.data === 'string' && n8nResponse.data.trim().length > 0));
+
+      // If no valid response, just finish loading without adding a message
+      if (!hasValidResponse) {
+        console.log("⚠️ No valid response from N8N (voice), skipping message");
+        return;
+      }
+
+      // Additional check for null-like string values in the response data
+      if (typeof n8nResponse.data === 'string' && 
+          (n8nResponse.data.toLowerCase() === 'null' || 
+           n8nResponse.data.toLowerCase() === 'undefined' ||
+           n8nResponse.data === 'null' ||
+           n8nResponse.data === 'undefined')) {
+        console.log("⚠️ Response data is null-like string (voice), skipping message");
+        return;
+      }
+
       // Handle N8N response
-      let aiResponseContent = "Audio processed but no response received.";
+      let aiResponseContent = "";
 
       // Handle different response structures - ensure we always extract a string
       if (n8nResponse.data?.message) {
@@ -763,6 +945,16 @@ const Index = () => {
         aiResponseContent = String(n8nResponse.data.response);
       } else if (typeof n8nResponse.data === "string") {
         aiResponseContent = n8nResponse.data;
+      }
+
+      // Skip if response is empty, whitespace, or null-like values
+      if (!aiResponseContent.trim() || 
+          aiResponseContent.toLowerCase() === 'null' || 
+          aiResponseContent.toLowerCase() === 'undefined' ||
+          aiResponseContent === 'null' ||
+          aiResponseContent === 'undefined') {
+        console.log("⚠️ Empty or null response content (voice), skipping message");
+        return;
       }
 
       const aiMessage: Message = {
@@ -838,7 +1030,13 @@ const Index = () => {
         };
       } else {
         // For binary files, convert to base64
-        return new Promise<any>((resolve) => {
+        return new Promise<{
+          name: string;
+          content: string;
+          isTextFile: boolean;
+          fileType: string;
+          fileSize: number;
+        }>((resolve) => {
           const reader = new FileReader();
           reader.onload = () => {
             const base64 = (reader.result as string).split(",")[1];
@@ -872,7 +1070,7 @@ const Index = () => {
       const binaryFilesCount = fileDataResolved.filter((f) => !f.isTextFile).length;
 
       // Store binary file IDs for later processing
-      const binaryFileIds = result.binaryFiles?.map((f: any) => f.id) || [];
+      const binaryFileIds = result.binaryFiles?.map((f: { id: string; name: string }) => f.id) || [];
 
       let message = "";
       if (textFilesCount > 0 && binaryFilesCount > 0) {
@@ -892,7 +1090,7 @@ const Index = () => {
       const newFiles = await Promise.all(
         files.map(async (file, idx) => {
           const resolvedFileData = fileDataResolved[idx];
-          const binaryFile = result.binaryFiles?.find((f: any) => f.name === file.name);
+          const binaryFile = result.binaryFiles?.find((f: { id: string; name: string }) => f.name === file.name);
 
           return {
             id: Date.now().toString() + Math.random(),
@@ -1073,6 +1271,7 @@ const Index = () => {
                       isLoading={true}
                     />
                   )}
+                  <div ref={messagesEndRef} />
                 </div>
               </ScrollArea>
             </div>
